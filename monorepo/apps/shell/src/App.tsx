@@ -1,4 +1,5 @@
-import { Navigate, Route, Routes, BrowserRouter } from "react-router-dom";
+import { useEffect } from "react";
+import { Route, Routes, BrowserRouter } from "react-router-dom";
 import Header from "./components/Header";
 import Footer from "./components/Footer";
 import Profile from "./pages/Profile";
@@ -6,6 +7,14 @@ import NotFound from "./pages/NotFound";
 import ThemeProvider, { useTheme } from "@frontend/auth/context/ThemeContext";
 import AuthProvider from "@frontend/auth/context/AuthContext";
 import Callback from "./pages/Callback";
+
+const GalleryRedirect = () => {
+  useEffect(() => {
+    window.location.replace("/gallery");
+  }, []);
+
+  return null;
+};
 
 const AppContent = () => {
   const { dark } = useTheme();
@@ -15,7 +24,7 @@ const AppContent = () => {
       <Header />
       <main className="flex-1 overflow-auto">
         <Routes>
-          <Route path="/" element={<Navigate to="/gallery" replace />} />
+          <Route path="/" element={<GalleryRedirect />} />
           <Route path="/profile" element={<Profile />} />
           <Route path="/callback" element={<Callback />} />
           <Route path="*" element={<NotFound />} />
