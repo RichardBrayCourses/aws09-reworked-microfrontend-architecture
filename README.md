@@ -1,12 +1,16 @@
 # AWS 09 - Microfrontend Architecture
 
-This reworked version keeps the independently deployable backend microservices from AWS 07 and AWS 08, then splits the browser experience into independently built route apps. The user still sees one website, but ownership is now divided between a shell app, a gallery app, and an analytics app.
+## Introduction
 
-The architectural baseline from the previous reworked sections stays in place: every service owns its runtime code, operational scripts, and CDK infrastructure. The former course `core-service` has been repatriated into `photos-service`, so photos, users, current likes, image storage, seed data, simulator endpoints, and the outbound photos event stream all live under `services/photos-service`.
+AWS 09 keeps the AWS 08 backend exactly in the microservices style already established, then gives the frontend the same professional ownership model. The single `apps/ui` application is split into three independently built route apps: `apps/shell`, `apps/gallery`, and `apps/analytics`. Users still experience one website, but the codebase is now organised so separate teams can build, test, and deploy their own frontend apps without waiting for one large UI bundle to move as a unit.
 
-This reworked AWS 09 also carries forward the route-app layout improvements that were previously mixed into the old AWS 11 material: each route app owns its own chrome, status surface, route base, and local development entry point. Rekognition and image tagging are not part of this version; those arrive in AWS 10.
+This is a route-based microfrontend architecture. The shell app owns the root experience, profile, auth callback, CloudFront distribution, S3 website bucket, and shared environment generation. The gallery app owns `/gallery` and `/gallery/upload`. The analytics app owns `/analytics` and `/analytics/images/:imageId`. Each app is a real Vite/React application with its own build, deploy, invalidation, local dev port, and route base.
 
-## Architecture
+CloudFront is the composition layer. The shell deploys one CloudFront distribution in front of one private S3 website bucket. The shell bundle is uploaded to the bucket root, the gallery bundle is uploaded under `/gallery/`, and the analytics bundle is uploaded under `/analytics/`. A small CloudFront Function rewrites browser requests such as `/gallery/upload` to `/gallery/index.html` and `/analytics/images/123` to `/analytics/index.html`, so direct refreshes work just like they would in a single-page app.
+
+This release deliberately does not use module federation or module federation 2.0. Module federation is useful when teams need to compose React components at runtime inside one page, but this application has clean route boundaries. Route-level microfrontends are simpler here: each app ships as static assets, CloudFront chooses the right app by URL path, no browser has to negotiate remote module versions, and a broken gallery deployment does not require the shell or analytics bundle to be rebuilt. Shared code still exists, but it is shared deliberately through workspace packages rather than loaded dynamically at runtime.
+
+## Mermaid Diagram
 
 ```mermaid
 %%{init: {"themeVariables": {"lineColor": "#ff1744", "edgeLabelBackground": "#334155"}, "themeCSS": ".edgeLabel rect { fill: #334155 !important; opacity: 1 !important; } .edgeLabel text, .edgeLabel span { fill: #f8fafc !important; color: #f8fafc !important; }"}}%%
@@ -67,7 +71,7 @@ flowchart LR
     websocketDisconnect[WebSocket disconnect Lambda]
     websocketApi[API Gateway WebSocket API]
     websocketConnections[DynamoDB connection IDs]
-    valkey[Valkey realtime circular buckets]
+    valkey["Valkey (Redis-compatible cache)<br/>realtime circular buckets"]
   end
 
   subgraph BackendPackages["<b>Backend packages</b>"]
@@ -161,240 +165,179 @@ flowchart LR
   style Terminal fill:#fff1f2,stroke:#e11d48,color:#0f172a
 ```
 
-## What This Version Teaches
+## Release Notes
 
-This version combines the realtime likes architecture from AWS 08 with the microfrontend route-app split from the old AWS 10 material, updated for the reworked service-owned backend:
+- **The single UI becomes professional microfrontends.** AWS 08 had one `apps/ui` frontend. AWS 09 splits that into `apps/shell`, `apps/gallery`, and `apps/analytics`, so each user-facing area has its own package, source tree, build, route base, and deployment script.
+- **Frontend teams can work independently.** The shell, gallery, and analytics apps can be developed on separate local ports, built separately, uploaded separately, and invalidated separately. A gallery change can be shipped with `pnpm run gallery:deploy`; an analytics change can be shipped with `pnpm run analytics:deploy`; shell infrastructure changes stay with `pnpm run shell:deploy`.
+- **CloudFront becomes the frontend router.** One CloudFront distribution fronts one private S3 bucket. Requests for `/` load the shell app, requests under `/gallery` load the gallery app, and requests under `/analytics` load the analytics app. The user sees one website, but CloudFront quietly routes each path to the correct static bundle.
+- **SPA refreshes work under every route app.** The CloudFront Function rewrites clean URLs without file extensions. `/gallery/upload` becomes `/gallery/index.html`; `/analytics/images/{imageId}` becomes `/analytics/index.html`; unknown root routes fall back to `/index.html`. That keeps deep links and browser refreshes working without a server-side frontend runtime.
+- **No module federation is required.** AWS 09 does not use module federation or module federation 2.0. The route boundaries are strong enough that runtime component loading would add more complexity than value. This approach avoids remote module version negotiation, shared dependency drift, runtime loading failures, and cross-app release coupling.
+- **Shared code moves into explicit frontend packages.** Common browser concerns are pulled into `packages/frontend`: `api-client` for service calls, `auth` for Cognito/session helpers, `ui` for shared components/styles, `tokens` for design tokens, and `tailwind-config` for consistent styling.
+- **Backend event contracts move to a backend package.** Event contracts live under `packages/backend/events`, keeping backend event types away from browser-only packages and making the frontend/backend boundary easier to understand.
+- **Local development mirrors production routing.** The shell dev server runs on port `5173` and proxies `/gallery` to the gallery app on `5174` and `/analytics` to the analytics app on `5175`. Developers can work in one route app while still clicking around as if CloudFront were serving the full website.
+- **Route apps communicate through URLs and APIs.** The gallery links to `/analytics/images/:imageId`; analytics reloads the photo and chart state from service APIs. Apps do not pass React props across bundle boundaries, which keeps ownership and deployability clean.
+- **The AWS08 backend remains intact.** Photos, historic likes, and the Python realtime likes service continue to run as independent backend services. AWS09 is about giving the browser side the same independence and team-friendly deployment model.
 
-- shell, gallery, and analytics route apps instead of one `apps/ui` application
-- one CloudFront distribution serving independently uploaded frontend bundles
-- CloudFront path routing and SPA rewrites for direct browser refreshes
-- route-app local development with Vite proxies that mimic CloudFront routing
-- shared browser-only packages under `packages/frontend`
-- backend event contracts under `packages/backend/events`
-- service-local CDK for Cognito, photos, historic likes, realtime likes, and shell hosting
-- SNS fan-out from the photos service `LikesEventsTopic` to multiple independent consumers
-- EventBridge projection streams for users and images
-- historic analytics in DynamoDB and realtime analytics in Valkey
-- WebSocket browser push that tells the analytics app when to refresh
-- command-driven deployments with independent frontend and backend deploy targets
+## How To Run
 
-This version deliberately does not introduce image tagging or Rekognition. The finished progression is: AWS 08 adds realtime likes, AWS 09 reorganises the frontend into route apps, and AWS 10 adds tagging.
+Most day-to-day work starts in the `monorepo` folder. The root scripts are thin wrappers around service-owned scripts, so you can either run the whole stack or step into one owner when you want to inspect something more closely.
 
-## Deployable Owners
-
-| Owner | Path | Owns |
-| --- | --- | --- |
-| Shell app | `monorepo/apps/shell` | Root route, navigation, profile, auth callback, website hosting CDK, env generation, CloudFront distribution, S3 website bucket |
-| Gallery app | `monorepo/apps/gallery` | `/gallery`, `/gallery/upload`, photo browsing, search, preview, upload, and current like actions |
-| Analytics app | `monorepo/apps/analytics` | `/analytics`, `/analytics/images/:imageId`, historic charts, realtime charts, tables, and WebSocket refresh handling |
-| Cognito service | `monorepo/services/cognito-service` | Cognito user pool, hosted UI domain, app client, post-confirmation Lambda, Cognito event bus, Cognito reset |
-| Photos service | `monorepo/services/photos-service` | Express API, RDS, S3, image CloudFront distribution, photos event bus, SNS likes topic, Cognito signup ingest, seed, simulator, API tests |
-| Historic likes service | `monorepo/services/historic-likes-service` | DynamoDB projections, historic like aggregates, SQS consumers, public historic likes API, historic reset and API tests |
-| Realtime likes service | `monorepo/services/realtime-likes-service` | Python Lambdas, Valkey buckets, realtime SQS consumer, SNS push consumer, REST API, WebSocket API, connection storage, public API tests |
-| Shared frontend packages | `monorepo/packages/frontend/*` | Browser API client, auth helpers, design tokens, Tailwind config, shared UI styles and components |
-| Shared backend events | `monorepo/packages/backend/events` | Cross-service event source, detail type, and payload contracts |
-
-Every deployable owner has its own CDK folder where it owns infrastructure:
-
-```text
-monorepo/apps/shell/cdk
-monorepo/services/cognito-service/cdk
-monorepo/services/photos-service/cdk
-monorepo/services/historic-likes-service/cdk
-monorepo/services/realtime-likes-service/cdk
-```
-
-There is no central root CDK app.
-
-## Route Ownership
-
-The frontend is organised around user-facing route ownership:
-
-```text
-apps/shell
-  /
-  /profile
-  /auth/callback
-  shared navigation, theme controls, auth frame, and website infrastructure
-
-apps/gallery
-  /gallery
-  /gallery/upload
-  photo browsing, search, preview, upload, and likes
-
-apps/analytics
-  /analytics
-  /analytics/images/:imageId
-  historic charts, realtime charts, table views, and browser push
-```
-
-The route apps communicate through URLs and service APIs. The shell links to `/gallery` and `/analytics` with normal browser navigation. The gallery links to `/analytics/images/:imageId` so analytics can reconstruct the page from the URL and the photos API instead of receiving React props from gallery.
-
-Each route app can evolve independently while sharing authentication, API clients, tokens, Tailwind configuration, and reusable UI components.
-
-## Website Deployment Model
-
-The website uses one S3 bucket and one CloudFront distribution. The route apps are built separately and uploaded into different prefixes:
-
-```text
-shell      -> /
-gallery    -> /gallery/
-analytics  -> /analytics/
-```
-
-Expected object layout:
-
-```text
-s3://website-bucket/index.html
-s3://website-bucket/assets/*
-
-s3://website-bucket/gallery/index.html
-s3://website-bucket/gallery/assets/*
-
-s3://website-bucket/analytics/index.html
-s3://website-bucket/analytics/assets/*
-```
-
-The CloudFront Function in `apps/shell/cdk` keeps browser refreshes working:
-
-```text
-/                         -> /index.html
-/gallery                  -> /gallery/index.html
-/gallery/upload           -> /gallery/index.html
-/analytics                -> /analytics/index.html
-/analytics/images/:imageId
-                          -> /analytics/index.html
-```
-
-This gives users a single site while preserving separate frontend build and deployment ownership. Shell, gallery, and analytics can be deployed independently after frontend-only changes.
-
-## Local Frontend Routing
-
-The root `dev` script first refreshes Vite env files, then starts all three Vite dev servers in parallel:
-
-```json
-{
-  "predev": "pnpm run generate-env",
-  "generate-env": "pnpm -C apps/shell run generate-env && pnpm -C apps/gallery run generate-env && pnpm -C apps/analytics run generate-env",
-  "dev": "pnpm --parallel -F @apps/shell -F @apps/gallery -F @apps/analytics dev"
-}
-```
-
-The apps use fixed local ports:
-
-```text
-shell      5173
-gallery    5174
-analytics  5175
-```
-
-`apps/shell/vite.config.ts` is the integrated local entry point. It serves the shell on port `5173` and proxies route-app paths to the other local Vite servers:
-
-```text
-/gallery    -> http://localhost:5174
-/analytics  -> http://localhost:5175
-```
-
-The proxy also rewrites bare route prefixes:
-
-```text
-/gallery    -> /gallery/
-/analytics  -> /analytics/
-```
-
-Those rewrites matter because the route apps are configured with path bases in their own Vite configs:
-
-```text
-apps/gallery     base: /gallery/
-apps/analytics   base: /analytics/
-```
-
-The local shell therefore behaves like CloudFront path routing: the browser can stay on `http://localhost:5173`, while `/gallery` and `/analytics` are served by their own independently running apps.
-
-Useful local URLs:
-
-```text
-shell      http://localhost:5173
-gallery    http://localhost:5173/gallery
-analytics  http://localhost:5173/analytics
-```
-
-You can also work on route apps in isolation:
+**Install and local checks**
 
 ```bash
-pnpm -C apps/gallery run dev
-pnpm -C apps/analytics run dev
+cd monorepo
+pnpm install
+pnpm run generate-env
+pnpm run dev              # shell on :5173, gallery on :5174, analytics on :5175
+pnpm run type-check
+pnpm run build
 ```
 
-Then open:
+**Deploy the backend services**
+
+```bash
+pnpm run bootstrap-up
+pnpm run cognito-service:deploy
+pnpm run photos-service:deploy
+pnpm run historic-likes-service:deploy
+pnpm run realtime-likes-service:deploy
+```
+
+**Deploy the UI**
+
+```bash
+pnpm run shell:deploy
+pnpm run gallery:deploy
+pnpm run analytics:deploy
+pnpm run ui:url
+```
+
+**Deploy everything in the expected order**
+
+```bash
+pnpm run deploy-everything
+```
+
+**Seed, reset, and simulate activity**
+
+```bash
+pnpm run data:seed          # upload starter images and publish image events
+pnpm run simulator:start    # create like/unlike traffic from terminal users
+pnpm -C services/photos-service run simulator:latest
+pnpm run data:reset         # clear photos data, historic projections, and Cognito test users
+```
+
+**Useful service tests**
+
+```bash
+pnpm -C services/photos-service run test:security
+pnpm -C services/historic-likes-service run test:public-api
+pnpm -C services/realtime-likes-service run test:public-api
+```
+
+**Tear down**
+
+```bash
+pnpm run destroy-everything
+pnpm run bootstrap-down
+```
+
+## Microservices
+
+### Cognito Service
+
+#### Service Overview
+
+The Cognito service owns sign-up, sign-in, hosted UI configuration, and the post-confirmation event that tells the rest of the system a user exists. It keeps authentication separate from the photo database while still letting app users appear in the gallery experience.
+
+#### Commands
+
+```bash
+pnpm run cognito-service:deploy
+pnpm -C services/cognito-service run data:reset
+pnpm run cognito-service:destroy
+```
+
+#### Endpoints
+
+Cognito is reached through its hosted UI and OAuth endpoints rather than the application REST APIs. A realistic deployed domain looks like:
 
 ```text
-http://localhost:5174/gallery
-http://localhost:5175/analytics
+http://uptick-auth-a1b2c3d4.auth.eu-west-1.amazoncognito.com/login
+http://uptick-auth-a1b2c3d4.auth.eu-west-1.amazoncognito.com/logout
+http://uptick-auth-a1b2c3d4.auth.eu-west-1.amazoncognito.com/oauth2/token
 ```
 
-## Shared Packages
+#### Event Queues
 
-Frontend packages:
+**CognitoEventBus**
+
+Subscribers: `photos-service` through `CognitoSignupQueue`.
+
+Messages:
 
 ```text
-packages/frontend/api-client
-packages/frontend/auth
-packages/frontend/tailwind-config
-packages/frontend/tokens
-packages/frontend/ui
+user.created
 ```
 
-Backend packages:
+#### Databases And Caches
+
+Cognito owns the user pool. The photos service stores an app-facing user row after it receives the signup event.
+
+#### SSM Parameters And Secrets
 
 ```text
-packages/backend/events
+/cognito/domain
+/cognito/client-id
+/cognito/user-pool-id
+/cognito/events/event-bus-name
 ```
 
-The route apps import service clients from `@frontend/api-client` instead of each app hand-rolling fetch logic. Authentication state is centralised in `@frontend/auth`, while shared styling primitives live in the UI, token, and Tailwind packages.
+### Photos Service
 
-The event package lives under `packages/backend` because this version does not introduce a package that is intentionally shared across browser and backend runtimes.
+#### Service Overview
 
-Tailwind entry points:
+The photos service owns the photo catalogue, image uploads, current like state, simulator endpoints, and the outbound domain events used by the analytics services. It is the main user-facing backend for the gallery.
+
+#### Commands
+
+```bash
+pnpm run photos-service:deploy
+pnpm -C services/photos-service run database:migrate
+pnpm -C services/photos-service run database:reset
+pnpm -C services/photos-service run data:seed
+pnpm -C services/photos-service run data:reset
+pnpm -C services/photos-service run simulator:start
+pnpm -C services/photos-service run test:security
+pnpm run photos-service:destroy
+```
+
+#### Endpoints
 
 ```text
-packages/frontend/ui/src/styles.css
-apps/shell/src/index.css
-apps/gallery/src/index.css
-apps/analytics/src/index.css
+http://photos-api-a1b2c3d4.execute-api.eu-west-1.amazonaws.com/health
+http://photos-api-a1b2c3d4.execute-api.eu-west-1.amazonaws.com/gallery-photos
+http://photos-api-a1b2c3d4.execute-api.eu-west-1.amazonaws.com/images/{imageId}
+http://photos-api-a1b2c3d4.execute-api.eu-west-1.amazonaws.com/auth/photos/gallery
+http://photos-api-a1b2c3d4.execute-api.eu-west-1.amazonaws.com/auth/photos/presigned-url
+http://photos-api-a1b2c3d4.execute-api.eu-west-1.amazonaws.com/auth/photos/{imageId}/like
+http://photos-api-a1b2c3d4.execute-api.eu-west-1.amazonaws.com/auth/users/me
+http://photos-api-a1b2c3d4.execute-api.eu-west-1.amazonaws.com/auth/users/me/nickname
+http://photos-api-a1b2c3d4.execute-api.eu-west-1.amazonaws.com/auth/admin/member
+http://photos-api-a1b2c3d4.execute-api.eu-west-1.amazonaws.com/auth/admin/photos
+http://photos-api-a1b2c3d4.execute-api.eu-west-1.amazonaws.com/simulation/tick
+http://photos-api-a1b2c3d4.execute-api.eu-west-1.amazonaws.com/simulation/likes
 ```
 
-Each app owns its own Tailwind source list so the independent route-app builds only scan the files they need.
+The `/auth/...` routes expect a signed-in user. The `/simulation/...` routes are for repeatable demos and use the simulator secret rather than a browser session.
 
-## Event Model
+#### Event Queues
 
-The system uses EventBridge for service-owned projection streams and SNS for fan-out like events.
+**PhotosEventBus**
 
-**Cognito signup events**
+Subscribers: `historic-likes-service` user projection consumer and image projection consumer.
 
-```text
-Cognito post-confirmation Lambda
-  -> CognitoEventBus
-    -> CognitoSignupQueue
-      -> photos-service cognitoSignupConsumer
-        -> Postgres registered_user
-```
-
-Cognito owns authentication and publishes `user.created` with source `uptick.cognito`. The photos service owns the Postgres write model, so it consumes the event and inserts or updates `registered_user`.
-
-New Cognito users are projected into the photos service asynchronously through EventBridge and SQS. The profile page retries profile loading briefly so the redirect after signup does not fail if the backend projection is still completing.
-
-**Photos projection events**
-
-```text
-photos-service
-  -> PhotosEventBus
-    -> historic-likes user projection queue
-    -> historic-likes image projection queue
-      -> DynamoDB read models
-```
-
-The photos service publishes projection events with source `uptick.photos`:
+Messages:
 
 ```text
 user.created
@@ -405,23 +348,11 @@ image.updated
 image.deleted
 ```
 
-The historic likes service builds DynamoDB user and image projections from that stream. Those projections let the analytics app understand authors and photos without reaching back into the photos service database.
+**LikesEventsTopic**
 
-**Like events**
+Subscribers: `historic-likes-service` through `HistoricLikesQueue`, `realtime-likes-service` through `RealtimeLikesQueue`, and the realtime push Lambda.
 
-```text
-photos-service
-  -> SNS LikesEventsTopic
-    -> SQS HistoricLikesQueue
-      -> historic-likes like and reset consumer
-    -> SQS RealtimeLikesQueue
-      -> realtime-likes Python like and reset consumer
-    -> realtime-likes Python push consumer
-        -> WebSocket API
-          -> Analytics app
-```
-
-Like events use SNS because independent services can subscribe to the same stream without the photos service knowing their internal storage choices. The events that drive both likes services are:
+Messages:
 
 ```text
 like.created
@@ -429,37 +360,17 @@ like.deleted
 likes.deleted.all
 ```
 
-`like.created` and `like.deleted` update current analytics. `likes.deleted.all` is published by the simulator reset path and tells the historic and realtime services to clear their own read models.
+**CognitoSignupQueue**
 
-## Realtime Likes Flow
+Owner: photos service. Subscriber: `cognitoSignupConsumer` inside the photos service.
 
-1. A user likes or unlikes a photo through the gallery app.
-2. `photos-service` records the command in Postgres.
-3. After the transaction commits, `photos-service` publishes a like event to the likes SNS topic.
-4. `historic-likes-service` consumes the event and updates accumulated historic read models in DynamoDB.
-5. `realtime-likes-service` consumes the same event and updates recent time buckets in Valkey.
-6. The realtime push consumer observes the like stream and sends lightweight WebSocket messages to connected browsers.
-7. Browsers refresh the realtime chart data through the realtime REST API.
+Messages:
 
-The WebSocket messages are intentionally small. They are invalidation messages, not chart payloads.
-
-```json
-{
-  "type": "realtime-bucket-changed"
-}
+```text
+user.created
 ```
 
-```json
-{
-  "type": "likes-reset"
-}
-```
-
-A bucket-change message tells the analytics app to refetch chart data. A reset message tells it to clear or refresh the visible chart state.
-
-## Data Ownership
-
-**Photos service Postgres tables**
+#### Databases And Caches
 
 ```text
 registered_user
@@ -467,593 +378,338 @@ images
 image_likes
 ```
 
-Postgres is the source of truth for users known to the app, uploaded image metadata, and the current like state. `image_likes` stores the current relationship between a user and a photo:
+PostgreSQL is the source of truth for app users, images, and current likes. Image files live in S3 and are served through CloudFront.
 
-```sql
-CREATE TABLE IF NOT EXISTS image_likes (
-    user_sub VARCHAR(255) NOT NULL,
-    image_id INT NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (user_sub, image_id)
-);
-```
-
-**Historic likes DynamoDB tables**
+#### SSM Parameters And Secrets
 
 ```text
-UsersProjectionTable
-ImagesProjectionTable
-HistoricPhotoBucketLikes
-HistoricAuthorBucketLikes
-```
-
-The projection tables hold the latest user and image read models. The aggregate tables hold sparse historic like buckets for images and authors.
-
-**Realtime likes storage**
-
-```text
-Valkey realtime buckets
-DynamoDB WebSocket connection table
-```
-
-Valkey holds recent image and author like buckets. DynamoDB stores active WebSocket connection IDs so the push consumer can notify connected browsers.
-
-## Realtime Buckets
-
-The realtime service stores short-window activity in Valkey. It tracks two views for the selected photo:
-
-```text
-image:{imageId}
-author:{authorUserId}
-```
-
-Each key is a circular hash of recent buckets. The finished browser-push version uses 5-second buckets so realtime and historic reset demos line up cleanly. Each bucket field stores the bucket start and count:
-
-```text
-bucketStart:count
-```
-
-Example:
-
-```text
-1718294400:12
-```
-
-When the same bucket slot comes around again, old data is replaced. The realtime service is only the recent activity lens; the historic service remains responsible for accumulated likes over longer periods.
-
-## Service APIs
-
-### Photos service
-
-The photos service is an Express app adapted to Lambda with `@codegenie/serverless-express`.
-
-Public routes:
-
-```text
-GET    /public/health
-GET    /public/gallery-photos
-GET    /public/images/:imageId
-POST   /public/simulation/tick
-DELETE /public/simulation/likes
-```
-
-Authenticated routes:
-
-```text
-GET    /auth/photos/gallery
-POST   /auth/photos/presigned-url
-POST   /auth/photos/:imageId/like
-GET    /auth/users/me
-PUT    /auth/users/me/nickname
-GET    /auth/admin/member
-DELETE /auth/admin/photos
-```
-
-Anonymous users use `GET /public/gallery-photos`. Signed-in users use `GET /auth/photos/gallery`, which adds `likedByCurrentUser` to each photo where appropriate.
-
-Toggling a like uses:
-
-```text
-POST /auth/photos/{imageId}/like
-```
-
-It returns the new current state:
-
-```json
-{
-  "liked": true
-}
-```
-
-`GET /public/images/:imageId` lets the analytics route reconstruct image context from `/analytics/images/:imageId` without depending on React state from the gallery app.
-
-### Historic likes service
-
-The historic likes service has small direct Lambda handlers behind API Gateway.
-
-Public routes:
-
-```text
-GET /public/health
-GET /public/photo-likes?imageId=<image-id>
-GET /public/author-likes?userId=<author-user-id>
-GET /public/historic-likes
-```
-
-With an ID, each endpoint returns chart data for one photo or one author. Missing buckets are filled with zero so the UI can render stable charts.
-
-### Realtime likes service
-
-The realtime likes service exposes a public read API and a WebSocket endpoint:
-
-```text
-GET /public/health
-GET /public/realtime-likes?imageId=<image-id>&authorUserId=<author-user-id>
-WSS realtime likes browser push endpoint
-```
-
-Example realtime API response:
-
-```json
-{
-  "image": [{ "label": "T-55", "likes": 0 }],
-  "author": [{ "label": "T-55", "likes": 0 }]
-}
-```
-
-The browser talks to three service endpoints:
-
-- the photos service for gallery, auth, uploads, simulator commands, and current like state
-- the historic likes service for accumulated chart data
-- the realtime likes service for short-window chart data and WebSocket refresh messages
-
-## UI Behaviour
-
-The route-app UI keeps the gallery workflow from AWS 07 and the realtime analytics workflow from AWS 08:
-
-- anonymous users can browse and search photos
-- signed-in users can like and unlike photos
-- a filled heart means the current user has liked the photo
-- upload and profile links appear only when signed in
-- `/gallery/upload` owns image upload
-- each gallery tile links to image analytics
-- `/analytics` shows analytics entry points
-- `/analytics/images/:imageId` shows analytics for a selected photo
-- chart mode shows historic author likes, historic image likes, realtime author likes, and realtime image likes
-- table mode shows the same underlying data in readable tables
-- historic charts are accumulated line charts
-- realtime charts are short-window bucket charts
-- author and image charts in each pair share the same y-axis scale
-- charts use simple integer y-axis labels and no visible time labels
-- the analytics app opens a WebSocket connection while an analytics route is visible
-- realtime bucket-change push messages refresh chart data
-- reset push messages clear the visible chart state
-
-The UI reads the public historic and realtime service APIs directly from the browser. Those chart calls do not require a Cognito token.
-
-## Python Realtime Service
-
-The realtime likes service is a Python service inside the existing pnpm/CDK monorepo. The Lambda handlers under `services/realtime-likes-service/src` are Python modules, while its infrastructure remains CDK TypeScript.
-
-The setup script lives at:
-
-```text
-services/realtime-likes-service/scripts/setup_python.py
-```
-
-It runs automatically before service type-checking or deployment. It:
-
-1. finds a suitable Python installation
-2. creates `.venv` if it does not already exist
-3. installs dependencies from `requirements.txt` if that file exists
-4. compile-checks the Python source code
-
-The TypeScript-to-Python equivalents are:
-
-| TypeScript | Python |
-| --- | --- |
-| `package.json` | `requirements.txt` |
-| `pnpm install` | `pip install -r requirements.txt` |
-| `node_modules` | `.venv` |
-| `tsc --noEmit` | `python -m compileall src` |
-| `export async function handler()` | `def handler()` |
-
-You do not normally need to activate the virtual environment manually. The service scripts do that setup work for deployment and checks.
-
-## Seed Data And Simulator
-
-Seed photos live at the repository root:
-
-```text
-photos-to-upload
-```
-
-The seed script is owned by the photos service:
-
-```text
-monorepo/services/photos-service/scripts/src/init-images.ts
-```
-
-It:
-
-1. reads the image bucket name from SSM at `/photos/images/bucket-name`
-2. reads local files from `../photos-to-upload` relative to the repository root through the service script default
-3. creates seed users
-4. uploads photos to S3
-5. inserts or updates rows in Postgres
-6. publishes matching `user.created` and `image.created` events to `PhotosEventBus`
-
-The reworked seed model creates artwork authors and simulator viewers. Artwork is assigned to `author-*` users, and simulator activity uses `viewer-*` users.
-
-Run seeding from the monorepo:
-
-```bash
-cd monorepo
-pnpm run data:seed
-```
-
-Override the photo folder if needed:
-
-```bash
-PHOTOS_DIR=/absolute/path/to/photos pnpm -C services/photos-service run data:seed
-```
-
-Start the simulator from the monorepo:
-
-```bash
-pnpm run simulator:start
-```
-
-The simulator:
-
-1. clears current Postgres likes by calling the simulator reset endpoint
-2. publishes a `likes.deleted.all` event
-3. calls `POST /public/simulation/tick` on a short interval
-4. creates likes for random unliked viewer/photo pairs
-5. stops when the tick limit is reached or no unliked pairs remain
-
-Use `data:reset` when you want to clear the full deployed environment. Use `simulator:start` when you only want fresh like activity for charts.
-
-## SSM Parameters
-
-The deployed services communicate through service-owned SSM parameters:
-
-```text
-/photos/events/event-bus-name
-/photos/events/likes-topic-arn
+/services/photos-service/base-url
+/photos/rds/secret-arn
 /photos/images/bucket-name
 /photos/images/distribution-url
-/photos/rds/secret-arn
+/photos/events/event-bus-name
+/photos/events/likes-topic-arn
 /photos/cognito-signup/queue-url
+/simulator/secret
+```
 
-/cognito/domain
-/cognito/client-id
+Consumed parameters:
+
+```text
 /cognito/user-pool-id
 /cognito/events/event-bus-name
+```
 
+### Historic Likes Service
+
+#### Service Overview
+
+The historic likes service turns photo, user, and like events into DynamoDB read models for longer-running analytics. The browser reads charts from this service instead of asking the photos database to perform reporting work.
+
+#### Commands
+
+```bash
+pnpm run historic-likes-service:deploy
+pnpm -C services/historic-likes-service run data:reset
+pnpm -C services/historic-likes-service run test:public-api
+pnpm run historic-likes-service:destroy
+```
+
+#### Endpoints
+
+```text
+http://historic-likes-api-e5f6g7h8.execute-api.eu-west-1.amazonaws.com/public/health
+http://historic-likes-api-e5f6g7h8.execute-api.eu-west-1.amazonaws.com/public/photo-likes
+http://historic-likes-api-e5f6g7h8.execute-api.eu-west-1.amazonaws.com/public/photo-likes?imageId={imageId}
+http://historic-likes-api-e5f6g7h8.execute-api.eu-west-1.amazonaws.com/public/author-likes
+http://historic-likes-api-e5f6g7h8.execute-api.eu-west-1.amazonaws.com/public/author-likes?authorUserId={userId}
+```
+
+#### Event Queues
+
+**HistoricLikesQueue**
+
+Owner: historic likes service. Publisher path: `photos-service` -> `LikesEventsTopic` -> `HistoricLikesQueue`.
+
+Messages:
+
+```text
+like.created
+like.deleted
+likes.deleted.all
+```
+
+**Projection Queues**
+
+Owner: historic likes service. Publisher path: `photos-service` -> `PhotosEventBus` -> projection consumers.
+
+Messages:
+
+```text
+user.created
+user.updated
+user.deleted
+image.created
+image.updated
+image.deleted
+```
+
+#### Databases And Caches
+
+```text
+HistoricLikesUsersTable
+HistoricLikesImagesTable
+HistoricPhotoBucketLikesTable
+HistoricAuthorBucketLikesTable
+```
+
+The projection tables keep enough user and image context for analytics screens. The bucket tables hold accumulated like deltas by photo and by author.
+
+#### SSM Parameters And Secrets
+
+```text
 /historic-likes/users-table-name
 /historic-likes/images-table-name
 /historic-likes/photo-bucket-likes-table-name
 /historic-likes/author-bucket-likes-table-name
 /historic-likes/queue-url
+/services/historic-likes-service/base-url
+```
 
+Consumed parameters:
+
+```text
+/photos/events/event-bus-name
+/photos/events/likes-topic-arn
+```
+
+### Realtime Likes Service
+
+#### Service Overview
+
+The realtime likes service is a Python Lambda service that keeps short, rolling like buckets in Valkey (Redis-compatible cache). It also stores WebSocket connection IDs so the analytics UI can refresh quickly when like events arrive.
+
+#### Commands
+
+```bash
+pnpm run realtime-likes-service:deploy
+pnpm -C services/realtime-likes-service run setup
+pnpm -C services/realtime-likes-service run test:public-api
+pnpm run realtime-likes-service:destroy
+```
+
+#### Endpoints
+
+```text
+http://realtime-likes-api-i9j0k1l2.execute-api.eu-west-1.amazonaws.com/public/health
+http://realtime-likes-api-i9j0k1l2.execute-api.eu-west-1.amazonaws.com/public/realtime-likes?imageId={imageId}&authorUserId={userId}
+http://realtime-likes-ws-m3n4o5p6.execute-api.eu-west-1.amazonaws.com/production
+```
+
+#### Event Queues
+
+**RealtimeLikesQueue**
+
+Owner: realtime likes service. Publisher path: `photos-service` -> `LikesEventsTopic` -> `RealtimeLikesQueue`.
+
+Messages:
+
+```text
+like.created
+like.deleted
+likes.deleted.all
+```
+
+**Realtime Push Subscription**
+
+Owner: realtime likes service. Publisher path: `photos-service` -> `LikesEventsTopic` -> push Lambda -> WebSocket API.
+
+Messages:
+
+```text
+like.created
+like.deleted
+likes.deleted.all
+```
+
+#### Databases And Caches
+
+```text
+Valkey (Redis-compatible cache) realtime buckets
+RealtimeWebSocketConnections DynamoDB table
+```
+
+Valkey (Redis-compatible cache) keeps circular 5-second buckets for images and authors. DynamoDB stores active WebSocket connection IDs.
+
+#### SSM Parameters And Secrets
+
+```text
 /realtime-likes/queue-url
+/services/realtime-likes-service/base-url
+/services/realtime-likes-service/websocket-url
+```
+
+Consumed parameters:
+
+```text
+/photos/events/likes-topic-arn
+```
+
+## Microfrontend Apps
+
+### Shell App
+
+#### App Overview
+
+The shell app owns `/`, `/profile`, `/auth/callback`, shared navigation, auth setup, and the CloudFront/S3 website infrastructure. It is the only frontend app with CDK because it owns the shared website bucket, CloudFront distribution, route rewrite function, and SSM parameters used by the other route apps.
+
+#### Commands
+
+```bash
+pnpm run shell:deploy
+pnpm -C apps/shell run deploy:infra
+pnpm -C apps/shell run generate-env
+pnpm -C apps/shell run url
+pnpm run shell:destroy
+```
+
+#### SSM Parameters Consumed
+
+```text
+/cognito/domain
+/cognito/client-id
+/cognito/user-pool-id
 /services/photos-service/base-url
 /services/historic-likes-service/base-url
 /services/realtime-likes-service/base-url
 /services/realtime-likes-service/websocket-url
 ```
 
-The route-app env generation script reads the public service URLs and Cognito settings from SSM and writes Vite `.env` files for `apps/shell`, `apps/gallery`, and `apps/analytics`.
-
-## Local Workflow
-
-Install dependencies from the monorepo folder:
-
-```bash
-cd monorepo
-pnpm install
-```
-
-Bring up local database support services:
-
-```bash
-pnpm run bootstrap-up
-```
-
-Generate route-app environment files from deployed SSM values:
-
-```bash
-pnpm run generate-env
-```
-
-Run the three frontend apps together:
-
-```bash
-pnpm run dev
-```
-
-Type-check and build the workspace:
-
-```bash
-pnpm run type-check
-pnpm run build
-```
-
-Run service API checks after deployment:
-
-```bash
-pnpm -C services/photos-service run test:security
-pnpm -C services/historic-likes-service run test:public-api
-pnpm -C services/realtime-likes-service run test:public-api
-```
-
-Clean package artifacts:
-
-```bash
-pnpm run package-cleanup
-```
-
-## Deployment
-
-Deploy everything:
-
-```bash
-cd monorepo
-pnpm install
-pnpm run deploy-everything
-pnpm run data:seed
-```
-
-`deploy-everything`:
-
-1. deploys shell website hosting infrastructure from `apps/shell/cdk`
-2. deploys Cognito and the post-confirmation trigger from `services/cognito-service/cdk`
-3. deploys `photos-service-stack` from `services/photos-service/cdk`, then runs database migrations
-4. deploys `historic-likes-service-stack` from `services/historic-likes-service/cdk`
-5. deploys `realtime-likes-service-stack` from `services/realtime-likes-service/cdk`
-6. generates env values, builds, uploads, and invalidates the shell app
-7. generates env values, builds, uploads, and invalidates the gallery app
-8. generates env values, builds, uploads, and invalidates the analytics app
-
-Deploy Cognito before the photos service. The photos service imports `/cognito/user-pool-id` and `/cognito/events/event-bus-name`.
-
-The photos service stack is the slow step on a cold account because it creates Aurora and CloudFront resources. Allow 30 to 45 minutes.
-
-After deployment:
-
-```bash
-pnpm run type-check
-pnpm -C services/photos-service run test:security
-pnpm -C services/historic-likes-service run test:public-api
-pnpm -C services/realtime-likes-service run test:public-api
-pnpm run ui:url
-```
-
-Deploy frontend apps independently:
-
-```bash
-pnpm run shell:deploy
-pnpm run gallery:deploy
-pnpm run analytics:deploy
-```
-
-Deploy backend services independently:
-
-```bash
-pnpm run cognito-service:deploy
-pnpm run photos-service:deploy
-pnpm run historic-likes-service:deploy
-pnpm run realtime-likes-service:deploy
-```
-
-Destroy backend services independently:
-
-```bash
-pnpm run realtime-likes-service:destroy
-pnpm run historic-likes-service:destroy
-pnpm run photos-service:destroy
-pnpm run cognito-service:destroy
-```
-
-Destroy shell hosting:
-
-```bash
-pnpm run shell:destroy
-```
-
-Destroy everything:
-
-```bash
-pnpm run destroy-everything
-```
-
-## Data Reset
-
-Reset deployed data back to a clean baseline:
-
-```bash
-pnpm run data:reset
-pnpm run data:seed
-```
-
-`data:reset` delegates to service-owned reset scripts:
-
-1. photos service migrates Postgres, clears `image_likes`, `images`, and `registered_user`, restores the `system` user, and empties the image bucket
-2. historic likes service purges the likes queue and clears DynamoDB projection and aggregate tables
-3. Cognito service deletes Cognito users
-
-The reset path does not reseed automatically. Run `pnpm run data:seed` after reset.
-
-If you need the script-managed Cognito test users recreated, run:
-
-```bash
-pnpm -C services/photos-service run test:security
-```
-
-## Useful Commands
-
-```bash
-pnpm run bootstrap-up
-pnpm run bootstrap-down
-pnpm run generate-env
-pnpm run dev
-pnpm run type-check
-pnpm run build
-pnpm run shell:deploy
-pnpm run gallery:deploy
-pnpm run analytics:deploy
-pnpm run photos-service:deploy
-pnpm run historic-likes-service:deploy
-pnpm run realtime-likes-service:deploy
-pnpm run cognito-service:deploy
-pnpm run data:reset
-pnpm run data:seed
-pnpm run simulator:start
-pnpm run ui:url
-```
-
-Service-local commands:
-
-```bash
-pnpm -C services/photos-service run database:migrate
-pnpm -C services/photos-service run database:reset
-pnpm -C services/photos-service run data:seed
-pnpm -C services/photos-service run data:reset
-pnpm -C services/photos-service run simulator:latest
-pnpm -C services/historic-likes-service run data:reset
-pnpm -C services/cognito-service run data:reset
-pnpm -C services/realtime-likes-service run setup
-pnpm -C services/realtime-likes-service run test:public-api
-```
-
-## Repository Shape
+#### SSM Parameters Stored
 
 ```text
-monorepo/
-  apps/
-    shell/
-      cdk/
-      scripts/
-      src/
-    gallery/
-      scripts/
-      src/
-    analytics/
-      scripts/
-      src/
-  packages/
-    backend/
-      events/
-    frontend/
-      api-client/
-      auth/
-      tailwind-config/
-      tokens/
-      ui/
-  scripts/
-  services/
-    cognito-service/
-      cdk/
-      src/
-    photos-service/
-      cdk/
-      database/
-      scripts/
-      src/
-    historic-likes-service/
-      cdk/
-      scripts/
-      src/
-    realtime-likes-service/
-      cdk/
-      scripts/
-      src/
-        consumers/
-        handlers/
-        utilities/
+/website/bucket-name
+/website/distribution-id
+/website/distribution-url
 ```
 
-## Expected Behaviour
+### Gallery App
 
-- `/` renders the shell app.
-- `/profile` renders the shell-owned profile route.
-- `/auth/callback` handles Cognito redirect flow.
-- `/gallery` renders the gallery app.
-- `/gallery/upload` renders the gallery upload route.
-- `/analytics` renders the analytics app.
-- `/analytics/images/:imageId` renders image analytics.
-- Browser refresh works on all frontend routes.
-- Shell can be deployed without rebuilding gallery or analytics.
-- Gallery can be deployed without rebuilding shell or analytics.
-- Analytics can be deployed without rebuilding shell or gallery.
-- Gallery search works inside the gallery app.
-- Gallery likes still publish historic and realtime like events.
-- Cognito sign-up creates app users through the event path, not through a direct Postgres write in the Cognito trigger.
-- The public gallery shows seeded artwork owned by `author-*` users.
-- Anonymous users can browse and open analytics.
-- Signed-in users can like and unlike photos.
-- Current like state is stored in Postgres.
-- The photos service publishes user and image projection events to `PhotosEventBus`.
-- The photos service publishes like and reset events to SNS.
-- The historic likes service consumes projection events and like events into DynamoDB.
-- The realtime likes service consumes like events into Valkey.
-- The realtime push consumer sends WebSocket invalidation messages.
-- The public historic and realtime APIs return chart data without Cognito.
-- Analytics shows historic author analytics, historic image analytics, realtime author analytics, and realtime image analytics.
-- Analytics supports chart and table modes.
-- Browser push refreshes realtime analytics while an analytics route is visible.
-- `simulator:start` generates live activity for the charts.
-- Historic and realtime services both reset after `likes.deleted.all`.
-- `pnpm run data:reset` followed by `pnpm run data:seed` returns the environment to the post-deploy baseline.
-- `pnpm run type-check` passes.
+#### App Overview
+
+The gallery app owns `/gallery` and `/gallery/upload`. It handles browsing, searching, uploading, liking, and links into analytics when a user wants more detail. It builds with `base: "/gallery/"`, uploads only to the `gallery/` S3 prefix, and can be deployed without rebuilding shell or analytics.
+
+#### Commands
+
+```bash
+pnpm run gallery:deploy
+pnpm -C apps/gallery run generate-env
+pnpm -C apps/gallery run build
+pnpm -C apps/gallery run upload
+pnpm -C apps/gallery run invalidate-cloudfront
+```
+
+#### SSM Parameters Consumed
+
+```text
+/website/bucket-name
+/website/distribution-id
+/services/photos-service/base-url
+/cognito/client-id
+/cognito/user-pool-id
+```
+
+### Analytics App
+
+#### App Overview
+
+The analytics app owns `/analytics` and `/analytics/images/:imageId`. It combines photo details, historic like buckets, realtime like buckets, and WebSocket refresh notifications. It builds with `base: "/analytics/"`, uploads only to the `analytics/` S3 prefix, and can be deployed without touching shell or gallery.
+
+#### Commands
+
+```bash
+pnpm run analytics:deploy
+pnpm -C apps/analytics run generate-env
+pnpm -C apps/analytics run build
+pnpm -C apps/analytics run upload
+pnpm -C apps/analytics run invalidate-cloudfront
+```
+
+#### SSM Parameters Consumed
+
+```text
+/website/bucket-name
+/website/distribution-id
+/services/photos-service/base-url
+/services/historic-likes-service/base-url
+/services/realtime-likes-service/base-url
+/services/realtime-likes-service/websocket-url
+```
 
 ## Troubleshooting
 
-If deployment fails because an old stack still exists, delete the older CloudFormation stacks manually before redeploying. This reworked version expects owner-local stacks:
+- If the UI has empty API URLs, run the relevant `generate-env` script after backend deployment.
+- If sign-in works but the app cannot find the user profile, run `pnpm run data:seed` or sign up again so the Cognito signup event reaches the photos service.
+- If analytics are empty after seeding, wait a few seconds for SQS/Lambda consumers, then run the public API test for the affected service.
+- If a reset appears partial, run `pnpm run data:reset` from the root so photos, historic likes, and Cognito are cleared together.
+- If CloudFormation says a stack already exists, destroy the owner stack from its package script and redeploy in dependency order.
+- If realtime charts stay flat, check the `RealtimeLikesQueue`, the Valkey (Redis-compatible cache) connection settings, and the WebSocket URL written to SSM.
+- If a direct refresh under `/gallery` or `/analytics` returns a 404, redeploy the shell infrastructure so the CloudFront function and SPA rewrites are current.
+- If a route app deploy appears to work but old assets are still loading, run that app's invalidate script. Gallery invalidates `/gallery` and `/gallery/*`; analytics invalidates `/analytics` and `/analytics/*`; shell invalidates the whole distribution.
+
+## Interesting Code Snippets New To This Release
+
+### Python Realtime Buckets
+
+```py
+BUCKET_COUNT = 20
+SECONDS_PER_BUCKET = 5
+body = {
+    'image': image_likes.chart(query['imageId']),
+    'author': author_likes.chart(query['authorUserId']),
+}
+```
+
+Realtime analytics are intentionally short-lived. The historic service keeps the long-running aggregate; Valkey (Redis-compatible cache) keeps the moving window.
+
+### Route Apps Deploy Independently
 
 ```text
-ui-stack
-cognito-stack
-photos-service-stack
-historic-likes-service-stack
-realtime-likes-service-stack
+shell      -> /
+gallery    -> /gallery/
+analytics  -> /analytics/
 ```
 
-Older snapshots used names such as `api-stack`, `core-service-stack`, `events-stack`, `images-stack`, `rds-stack`, `website-stack`, `cognito-post-confirmation-stack`, or central `cdk/*` stacks.
+The apps share packages and a CloudFront distribution, but each route bundle can be built and uploaded on its own. This is the key microfrontend move in AWS 09: route ownership, independent deploys, and URL-based composition.
 
-If the UI has stale service URLs, regenerate env values and redeploy the affected route apps:
+### CloudFront Route Rewrites
 
-```bash
-pnpm run generate-env
-pnpm run shell:deploy
-pnpm run gallery:deploy
-pnpm run analytics:deploy
+```js
+if (uri === "/gallery" || uri.indexOf("/gallery/") === 0 && uri.indexOf(".") === -1) {
+  request.uri = "/gallery/index.html";
+}
+
+if (uri === "/analytics" || uri.indexOf("/analytics/") === 0 && uri.indexOf(".") === -1) {
+  request.uri = "/analytics/index.html";
+}
 ```
 
-If the gallery is empty after a reset, run:
+CloudFront chooses the right frontend app by URL path before S3 is asked for an object. That gives the application clean microfrontend routing without a Node frontend server and without module federation.
 
-```bash
-pnpm run data:seed
+### No Module Federation Runtime
+
+```text
+browser URL -> CloudFront path rewrite -> route app index.html -> app-owned bundle
 ```
 
-If historic charts stay flat, run the simulator and wait for events to move through SNS, SQS, Lambda, and DynamoDB:
+The route apps are composed at the CDN and URL level, not by loading remote React modules into one runtime. For this project that is a better fit: releases are simpler, each app owns its route surface, shared code is versioned through workspace packages, and runtime coupling stays low.
 
-```bash
-pnpm run simulator:start
+### Event Payloads Are Shared Contracts
+
+```text
+like.created
+like.deleted
+likes.deleted.all
 ```
 
-If realtime charts stay flat, check that the realtime service deployed after the photos service, then run:
-
-```bash
-pnpm -C services/realtime-likes-service run test:public-api
-pnpm run simulator:start
-```
-
-If browser push is not visible, remember that the UI does not show connection status. Open an analytics route, run the simulator, and watch for realtime chart refreshes as bucket-change messages arrive.
-
-## Source Material Folded Into This Version
-
-This reworked AWS 09 principally synthesizes the old AWS 10 microfrontend architecture material. It also folds in relevant content from the reworked AWS 08 realtime likes README and the old AWS 11 route-app layout improvements, while intentionally leaving out Rekognition and tagging features.
-
-The current version keeps the learning content from the older historic, realtime, backend-ownership, and microfrontend lessons, but updates names and paths to the reworked architecture: `photos-service`, `PhotosEventBus`, `/photos/...` SSM parameters, owner-local CDK folders, `packages/backend/events`, and the three route apps under `apps/shell`, `apps/gallery`, and `apps/analytics`.
+The photos service publishes like events once. Historic and realtime services decide for themselves how to store and serve those events.
