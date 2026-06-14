@@ -5,13 +5,7 @@ import {
   getPhoto,
 } from "@frontend/api-client/services/photosService";
 import ThemeProvider, { useTheme } from "@frontend/auth/context/ThemeContext";
-import {
-  BrowserRouter,
-  Navigate,
-  Route,
-  Routes,
-  useParams,
-} from "react-router-dom";
+import { BrowserRouter, Route, Routes, useParams } from "react-router-dom";
 import { useEffect, useState } from "react";
 import AnalyticsPreview from "./components/AnalyticsPreview";
 import "./index.css";
@@ -21,6 +15,14 @@ const rootDivElement = document.getElementById("root");
 if (!rootDivElement) {
   throw new Error('Could not find root element with id "root"');
 }
+
+const GalleryRedirect = () => {
+  useEffect(() => {
+    window.location.replace("/gallery");
+  }, []);
+
+  return null;
+};
 
 const AnalyticsApp = () => {
   const { dark } = useTheme();
@@ -53,7 +55,7 @@ const AnalyticsApp = () => {
     <div className="flex min-h-screen flex-col bg-background text-foreground">
       <main className="flex-1 overflow-auto">
         <Routes>
-          <Route path="/" element={<Navigate to="/gallery" replace />} />
+          <Route path="/" element={<GalleryRedirect />} />
           <Route path="/images/:imageId" element={<ImageAnalyticsRoute />} />
         </Routes>
       </main>
