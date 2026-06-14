@@ -1,0 +1,40 @@
+{
+  "name": "@apps/shell",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "deploy:infra": "cdk deploy ui-stack --require-approval never --app \"tsx ./cdk/src/bin/website.ts\"",
+    "destroy": "cdk destroy ui-stack --force --require-approval never --app \"tsx ./cdk/src/bin/website.ts\"",
+    "generate-env": "bash scripts/generate-ui-env.sh",
+    "upload": "bash scripts/upload-ui.sh",
+    "invalidate-cloudfront": "bash scripts/invalidate-cloudfront.sh",
+    "url": "bash scripts/get-ui-url.sh",
+    "deploy": "pnpm run deploy:infra && pnpm run generate-env && pnpm run build && pnpm run upload && pnpm run invalidate-cloudfront",
+    "type-check": "tsc --noEmit && tsc --noEmit -p cdk/tsconfig.json",
+    "package-cleanup": "rm -rf node_modules dist cdk.out"
+  },
+  "dependencies": {
+    "@frontend/api-client": "workspace:*",
+    "@frontend/auth": "workspace:*",
+    "@frontend/ui": "workspace:*",
+    "lucide-react": "^0.575.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-router-dom": "7.13.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.0.0",
+    "@types/node": "^25.3.1",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "aws-cdk-lib": "2.235.1",
+    "constructs": "10.4.5",
+    "tsx": "4.21.0",
+    "typescript": "5.9.3",
+    "vite": "^7.3.1"
+  }
+}

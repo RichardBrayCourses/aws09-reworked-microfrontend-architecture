@@ -1,0 +1,8 @@
+@import "@frontend/ui/styles.css";
+
+@source "./";
+@source "../../gallery/src";
+@source "../../analytics/src";
+@source "../../../packages/frontend/ui/src";
+@source "../../../packages/frontend/auth/src";
+@source "../../../packages/frontend/api-client/src";

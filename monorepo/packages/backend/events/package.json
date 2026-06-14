@@ -1,0 +1,16 @@
+{
+  "name": "@backend/events",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "type-check": "tsc --noEmit",
+    "package-cleanup": "rm -rf node_modules"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  }
+}

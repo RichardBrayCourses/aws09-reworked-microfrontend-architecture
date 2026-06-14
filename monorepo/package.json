@@ -1,0 +1,39 @@
+{
+  "name": "root",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "install:macos": "bash scripts/install-flyway-and-pgadmin-macos.sh",
+    "install:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-flyway-and-pgadmin-windows.ps1",
+    "generate-env": "pnpm -C apps/shell run generate-env && pnpm -C apps/gallery run generate-env && pnpm -C apps/analytics run generate-env",
+    "predev": "pnpm run generate-env",
+    "dev": "pnpm --parallel -F @apps/shell -F @apps/gallery -F @apps/analytics dev",
+    "dev:shell": "pnpm -F @apps/shell dev",
+    "build": "pnpm -r build",
+    "bootstrap-up": "pnpm -C scripts run bootstrap-up",
+    "bootstrap-down": "pnpm -C scripts run bootstrap-down",
+    "shell:deploy": "pnpm -C apps/shell run deploy",
+    "shell:destroy": "pnpm -C apps/shell run destroy",
+    "gallery:deploy": "pnpm -C apps/gallery run deploy",
+    "analytics:deploy": "pnpm -C apps/analytics run deploy",
+    "photos-service:deploy": "pnpm -C services/photos-service run deploy",
+    "photos-service:destroy": "pnpm -C services/photos-service run destroy",
+    "historic-likes-service:deploy": "pnpm -C services/historic-likes-service run deploy",
+    "historic-likes-service:destroy": "pnpm -C services/historic-likes-service run destroy",
+    "realtime-likes-service:deploy": "pnpm -C services/realtime-likes-service run deploy",
+    "realtime-likes-service:destroy": "pnpm -C services/realtime-likes-service run destroy",
+    "cognito-service:deploy": "pnpm -C services/cognito-service run deploy",
+    "cognito-service:destroy": "pnpm -C services/cognito-service run destroy",
+    "deploy-everything": "pnpm -C apps/shell run deploy:infra && pnpm run cognito-service:deploy && pnpm run photos-service:deploy && pnpm run historic-likes-service:deploy && pnpm run realtime-likes-service:deploy && pnpm run shell:deploy && pnpm run gallery:deploy && pnpm run analytics:deploy",
+    "destroy-everything": "pnpm run shell:destroy && pnpm run realtime-likes-service:destroy && pnpm run historic-likes-service:destroy && pnpm run photos-service:destroy && pnpm run cognito-service:destroy",
+    "data:reset": "pnpm -C services/photos-service run data:reset && pnpm -C services/historic-likes-service run data:reset && pnpm -C services/cognito-service run data:reset",
+    "data:seed": "pnpm -C services/photos-service run data:seed",
+    "simulator:start": "pnpm -C services/photos-service run simulator:start",
+    "ui:url": "pnpm -C apps/shell run url",
+    "type-check": "pnpm -r type-check ",
+    "package-cleanup": "pnpm -r package-cleanup && rm -rf node_modules "
+  },
+  "devDependencies": {
+    "esbuild": "0.27.7"
+  }
+}

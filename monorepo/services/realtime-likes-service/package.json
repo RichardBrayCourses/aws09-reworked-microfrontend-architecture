@@ -1,0 +1,23 @@
+{
+  "name": "@services/realtime-likes-service",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "setup": "python3 scripts/setup_python.py",
+    "type-check": "pnpm run setup && tsc --noEmit -p cdk/tsconfig.json",
+    "deploy": "pnpm run setup && cdk deploy realtime-likes-service-stack --require-approval never --app \"tsx ./cdk/src/bin/realtimeLikes.ts\"",
+    "destroy": "cdk destroy realtime-likes-service-stack --force --require-approval never --app \"tsx ./cdk/src/bin/realtimeLikes.ts\"",
+    "test:public-api": "bash scripts/realtime-likes-service-test.sh",
+    "package-cleanup": "rm -rf node_modules cdk.out .venv __pycache__ src/**/__pycache__ .pytest_cache .ruff_cache"
+  },
+  "dependencies": {
+    "aws-cdk-lib": "2.235.1",
+    "constructs": "10.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.1",
+    "tsx": "4.21.0",
+    "typescript": "5.9.3"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "name": "@frontend/api-client",
+  "type": "module",
+  "private": true,
+  "exports": {
+    ".": "./src/types.ts",
+    "./config": "./src/config.ts",
+    "./services/photosService": "./src/services/photosService.ts",
+    "./services/historicLikesService": "./src/services/historicLikesService.ts",
+    "./services/realtimeLikesService": "./src/services/realtimeLikesService.ts"
+  },
+  "dependencies": {
+    "@frontend/auth": "workspace:*"
+  },
+  "scripts": {
+    "type-check": "tsc --noEmit",
+    "package-cleanup": "rm -rf node_modules"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "vite": "^7.3.1"
+  }
+}

@@ -1,0 +1,5 @@
+@import "@frontend/ui/styles.css";
+
+@source "./";
+@source "../../../packages/frontend/ui/src";
+@source "../../../packages/frontend/api-client/src";

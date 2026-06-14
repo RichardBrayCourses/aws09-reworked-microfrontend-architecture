@@ -1,0 +1,16 @@
+{
+  "name": "@frontend/tailwind-config",
+  "type": "module",
+  "private": true,
+  "exports": {
+    ".": "./tailwind.config.ts"
+  },
+  "scripts": {
+    "type-check": "tsc --noEmit",
+    "package-cleanup": "rm -rf node_modules"
+  },
+  "devDependencies": {
+    "tailwindcss": "^4.0.0",
+    "typescript": "5.9.3"
+  }
+}

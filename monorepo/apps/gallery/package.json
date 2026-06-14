@@ -1,0 +1,34 @@
+{
+  "name": "@apps/gallery",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "vite --port 5174",
+    "build": "vite build",
+    "preview": "vite preview --port 4174",
+    "generate-env": "bash ../shell/scripts/generate-ui-env.sh",
+    "upload": "bash scripts/upload-route-app.sh",
+    "invalidate-cloudfront": "bash scripts/invalidate-route-app.sh",
+    "deploy": "pnpm run generate-env && pnpm run build && pnpm run upload && pnpm run invalidate-cloudfront",
+    "type-check": "tsc --noEmit",
+    "package-cleanup": "rm -rf node_modules dist"
+  },
+  "dependencies": {
+    "@frontend/api-client": "workspace:*",
+    "@frontend/auth": "workspace:*",
+    "@frontend/ui": "workspace:*",
+    "lucide-react": "^0.575.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-router-dom": "7.13.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.0.0",
+    "@types/node": "^25.3.1",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "typescript": "5.9.3",
+    "vite": "^7.3.1"
+  }
+}

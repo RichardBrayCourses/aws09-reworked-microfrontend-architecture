@@ -1,0 +1,8 @@
+{
+  "name": "@frontend/tokens",
+  "type": "module",
+  "private": true,
+  "exports": {
+    "./tokens.css": "./src/tokens.css"
+  }
+}

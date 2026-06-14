@@ -1,0 +1,22 @@
+{
+  "name": "@frontend/auth",
+  "type": "module",
+  "private": true,
+  "exports": {
+    "./context/AuthContext": "./src/context/AuthContext.tsx",
+    "./context/ThemeContext": "./src/context/ThemeContext.tsx",
+    "./utils/authStorageKeys": "./src/utils/authStorageKeys.ts"
+  },
+  "dependencies": {
+    "react": "^19.0.0"
+  },
+  "scripts": {
+    "type-check": "tsc --noEmit",
+    "package-cleanup": "rm -rf node_modules"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "typescript": "5.9.3",
+    "vite": "^7.3.1"
+  }
+}
